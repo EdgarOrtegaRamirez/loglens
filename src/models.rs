@@ -41,6 +41,7 @@ impl LogLevel {
         }
     }
 
+    #[allow(dead_code)]
     pub fn color_name(&self) -> colored::ColoredString {
         use colored::Colorize;
         match self {

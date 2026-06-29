@@ -6,8 +6,7 @@ mod output;
 mod parser;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, Read};
 
 #[derive(Parser)]
 #[command(
@@ -166,15 +165,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn open_reader(file: &str) -> Result<Box<dyn BufRead>, Box<dyn std::error::Error>> {
-    if file == "-" {
-        Ok(Box::new(BufReader::new(io::stdin())))
-    } else {
-        let f = File::open(file)?;
-        Ok(Box::new(BufReader::new(f)))
-    }
-}
-
 fn read_file_content(file: &str) -> Result<String, Box<dyn std::error::Error>> {
     if file == "-" {
         let mut content = String::new();
@@ -220,10 +210,10 @@ fn cmd_analyze(
         let min = models::LogLevel::from_str(min_level);
         entries.retain(|e| e.level >= min);
     }
-    if let Some(ref src) = source {
-        entries.retain(|e| e.source.as_ref().map(|s| s.contains(*src)).unwrap_or(false));
+    if let Some(src) = source {
+        entries.retain(|e| e.source.as_ref().map(|s| s.contains(src)).unwrap_or(false));
     }
-    if let Some(ref pattern) = grep {
+    if let Some(pattern) = grep {
         let re = regex::Regex::new(pattern)?;
         entries.retain(|e| re.is_match(&e.message));
     }

@@ -110,7 +110,7 @@ pub fn cluster_errors(entries: &[LogEntry]) -> Vec<ErrorCluster> {
     }
 
     let mut result: Vec<ErrorCluster> = clusters.into_values().collect();
-    result.sort_by(|a, b| b.count.cmp(&a.count));
+    result.sort_by_key(|c| std::cmp::Reverse(c.count));
     result
 }
 
@@ -157,7 +157,7 @@ pub fn detect_anomalies(entries: &[LogEntry], bucket_minutes: u64) -> Vec<Anomal
         }
     }
 
-    anomalies.sort_by(|a, b| b.error_count.cmp(&a.error_count));
+    anomalies.sort_by_key(|a| std::cmp::Reverse(a.error_count));
     anomalies
 }
 

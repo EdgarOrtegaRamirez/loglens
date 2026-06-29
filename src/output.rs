@@ -11,7 +11,7 @@ pub fn print_summary(stats: &LogStats) {
         "{}",
         "═══════════════════════════════════════════════════".dimmed()
     );
-    println!("  {} Log Analysis Summary", "📊".to_string());
+    println!("  📊 Log Analysis Summary");
     println!(
         "{}",
         "═══════════════════════════════════════════════════".dimmed()
@@ -116,7 +116,7 @@ pub fn print_clusters(clusters: &[ErrorCluster]) {
         "{}",
         "═══════════════════════════════════════════════════".dimmed()
     );
-    println!("  {} Error Clusters", "🔍".to_string());
+    println!("  🔍 Error Clusters");
     println!(
         "{}",
         "═══════════════════════════════════════════════════".dimmed()
@@ -162,7 +162,7 @@ pub fn print_anomalies(anomalies: &[AnomalyReport]) {
         "{}",
         "═══════════════════════════════════════════════════".dimmed()
     );
-    println!("  {} Rate Anomalies", "⚠️".to_string());
+    println!("  ⚠️ Rate Anomalies");
     println!(
         "{}",
         "═══════════════════════════════════════════════════".dimmed()
