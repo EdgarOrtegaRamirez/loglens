@@ -1,19 +1,29 @@
 //! LogLens — A fast, structured log analyzer CLI.
+//!
+//! Features:
+//! - Multi-format log parsing, analysis, clustering, and anomaly detection
+//! - Log generation (mock logs for testing pipelines)
+//! - Log compression (Drain algorithm for template extraction)
 
 mod analyzer;
+mod compress;
+mod generate;
 mod models;
 mod output;
 mod parser;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use std::io::{self, Read};
+use compress::DrainConfig;
+use generate::GenerateConfig;
+use std::io::{self, BufReader, Read, Write};
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(
     name = "loglens",
     about = "A fast, structured log analyzer for parsing, analyzing, and understanding log files",
     version,
-    long_about = "LogLens parses multiple log formats (JSON, logfmt, syslog, plain text),\nanalyzes patterns, detects anomalies, and clusters errors.\n\nSupported formats:\n  • JSON/JSONL (auto-detected fields: msg, level, timestamp, logger)\n  • Logfmt (key=value pairs)\n  • Syslog (RFC 3164 and RFC 5424)\n  • Plain text (regex-based pattern detection)"
+    long_about = "LogLens parses multiple log formats (JSON, logfmt, syslog, plain text),\nanalyzes patterns, detects anomalies, clusters errors, generates mock logs,\nand compresses logs via the Drain algorithm.\n\nSupported formats:\n  • JSON/JSONL (auto-detected fields: msg, level, timestamp, logger)\n  • Logfmt (key=value pairs)\n  • Syslog (RFC 3164 and RFC 5424)\n  • Plain text (regex-based pattern detection)"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -111,6 +121,64 @@ enum Commands {
 
     /// Show supported log formats and field mappings
     Formats,
+
+    /// Generate mock log files for testing pipelines
+    Generate {
+        /// Output format (json, logfmt, syslog, apache, nginx, csv, plain)
+        #[arg(short, long, default_value = "json")]
+        format: String,
+
+        /// Number of log lines to generate
+        #[arg(short, long, default_value = "100")]
+        count: u64,
+
+        /// Lines per second (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        rate: u64,
+
+        /// Output file (default: stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Start time (ISO 8601)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End time (ISO 8601)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Correlation ID prefix (enables correlation IDs)
+        #[arg(long)]
+        correlation: Option<String>,
+
+        /// Path to YAML config file
+        #[arg(short = 'C', long)]
+        config: Option<String>,
+    },
+
+    /// Compress logs by extracting templates (Drain algorithm)
+    Compress {
+        /// Log file path (use - for stdin)
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Output format (text, json, csv)
+        #[arg(short = 'o', long, default_value = "text")]
+        output: CompressFormat,
+
+        /// Tree depth for Drain algorithm (default: 4)
+        #[arg(long, default_value = "4")]
+        depth: usize,
+
+        /// Similarity threshold 0.0-1.0 (default: 0.5)
+        #[arg(long, default_value = "0.5")]
+        similarity: f64,
+
+        /// Max children per tree node (default: 100)
+        #[arg(long, default_value = "100")]
+        max_children: usize,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -120,6 +188,13 @@ enum OutputFormat {
     Json,
     Yaml,
     Jsonl,
+}
+
+#[derive(Clone, ValueEnum)]
+enum CompressFormat {
+    Text,
+    Json,
+    Csv,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -160,6 +235,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => cmd_parse(&file, format.as_deref(), output, level.as_deref())?,
         Commands::Detect { file } => cmd_detect(&file)?,
         Commands::Formats => cmd_formats(),
+        Commands::Generate {
+            format,
+            count,
+            rate,
+            output,
+            start,
+            end,
+            correlation,
+            config: _config_path,
+        } => cmd_generate(
+            &format,
+            count,
+            rate,
+            output.as_deref(),
+            start,
+            end,
+            correlation,
+        )?,
+        Commands::Compress {
+            file,
+            output,
+            depth,
+            similarity,
+            max_children,
+        } => cmd_compress(&file, output, depth, similarity, max_children)?,
     }
 
     Ok(())
@@ -372,4 +472,103 @@ fn cmd_formats() {
     println!("             Detects: ISO timestamps, log levels, module names");
     println!();
     println!("  auto     — Auto-detect format from file content (default)");
+    println!();
+    println!("Generation Formats:");
+    println!("  json     — JSON/JSONL output");
+    println!("  logfmt   — logfmt (key=value pairs)");
+    println!("  syslog   — Syslog format");
+    println!("  apache   — Apache Combined Log Format");
+    println!("  nginx    — Nginx access log format");
+    println!("  csv      — CSV (timestamp,level,source,message,correlation_id)");
+    println!("  plain    — Plain text");
+    println!();
+    println!("Compression (Drain Algorithm):");
+    println!("  Templates extracted via fixed-depth parse tree");
+    println!("  Default: depth=4, similarity=0.5, max_children=100");
+}
+
+fn cmd_generate(
+    format: &str,
+    count: u64,
+    rate: u64,
+    output_path: Option<&str>,
+    start: Option<String>,
+    end: Option<String>,
+    correlation: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = GenerateConfig {
+        format: format.to_lowercase(),
+        count,
+        rate,
+        start,
+        end,
+        correlation_prefix: correlation,
+        extra: None,
+    };
+
+    match output_path {
+        Some(path) => {
+            let file = std::fs::File::create(Path::new(path))?;
+            let mut writer = std::io::BufWriter::new(file);
+            let generated = generate::generate_logs(&config, &mut writer)?;
+            eprintln!("Generated {} log lines to {}", generated, path);
+        }
+        None => {
+            let stdout = std::io::stdout();
+            let mut writer = std::io::BufWriter::new(stdout.lock());
+            let generated = generate::generate_logs(&config, &mut writer)?;
+            eprintln!("Generated {} log lines to stdout", generated);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_compress(
+    file: &str,
+    output: CompressFormat,
+    depth: usize,
+    similarity: f64,
+    max_children: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let drain_config = DrainConfig {
+        depth,
+        similarity,
+        max_children,
+    };
+
+    let mut parser = compress::DrainParser::new(drain_config);
+
+    let (result, _) = if file == "-" {
+        let stdin = io::stdin();
+        let mut reader = BufReader::new(stdin.lock());
+        let result = parser.parse(&mut reader);
+        (result, ())
+    } else {
+        let f = std::fs::File::open(Path::new(file))?;
+        let mut reader = BufReader::new(f);
+        let result = parser.parse(&mut reader);
+        (result, ())
+    };
+
+    match output {
+        CompressFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        CompressFormat::Csv => {
+            println!("template,count,percentage");
+            for t in &result.templates {
+                let escaped = t.template.replace('"', "\"\"");
+                println!("\"{}\",{},{:.2}", escaped, t.count, t.percentage);
+            }
+        }
+        CompressFormat::Text => {
+            print!(
+                "{}",
+                compress::format_templates_text(&result.templates, result.total_lines)
+            );
+        }
+    }
+
+    Ok(())
 }
