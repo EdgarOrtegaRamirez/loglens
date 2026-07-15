@@ -2,20 +2,26 @@
 //!
 //! Features:
 //! - Multi-format log parsing, analysis, clustering, and anomaly detection
+//! - Advanced filtering (eq, neq, contains, not_contains, regex, gt, lt, startswith, endswith)
 //! - Log generation (mock logs for testing pipelines)
 //! - Log compression (Drain algorithm for template extraction)
+//! - Compact statistics output
+//! - Multiple output formats (text, json, yaml, csv, tsv, table)
 
 mod analyzer;
 mod compress;
+mod filter;
 mod generate;
 mod models;
 mod output;
 mod parser;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use compress::DrainConfig;
+use compress::{CompressFormat, DrainConfig};
+use filter::Filter;
 use generate::GenerateConfig;
-use std::io::{self, BufReader, Read, Write};
+use output::{OutputFormat, print_entries, print_entry, print_stats_compact};
+use std::io::{self, BufReader, Read};
 use std::path::Path;
 
 #[derive(Parser)]
@@ -23,7 +29,10 @@ use std::path::Path;
     name = "loglens",
     about = "A fast, structured log analyzer for parsing, analyzing, and understanding log files",
     version,
-    long_about = "LogLens parses multiple log formats (JSON, logfmt, syslog, plain text),\nanalyzes patterns, detects anomalies, clusters errors, generates mock logs,\nand compresses logs via the Drain algorithm.\n\nSupported formats:\n  • JSON/JSONL (auto-detected fields: msg, level, timestamp, logger)\n  • Logfmt (key=value pairs)\n  • Syslog (RFC 3164 and RFC 5424)\n  • Plain text (regex-based pattern detection)"
+    long_about = "LogLens parses multiple log formats (JSON, logfmt, syslog, plain text, RFC3339, \
+                  ISO, Apache access logs), analyzes patterns, detects anomalies, clusters errors, \
+                  generates mock logs, and compresses logs via the Drain algorithm.\n\n\
+                  Supported formats:\n  • JSON/JSONL (auto-detected fields: msg, level, timestamp, logger)\n  • Logfmt (key=value pairs)\n  • Syslog (RFC 3164 and RFC 5424)\n  • Plain text (regex-based pattern detection)\n  • RFC3339 timestamps with level\n  • ISO timestamps with space-separated level\n  • Apache/Nginx access logs"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -57,6 +66,15 @@ enum Commands {
         /// Search for text in messages
         #[arg(short, long)]
         grep: Option<String>,
+
+        /// Advanced filter condition (e.g., "level=ERROR", "message contains 'timeout'", "status gt 100")
+        /// Repeatable: --filter "level=ERROR" --filter "message contains 'auth'"
+        #[arg(long)]
+        filter: Vec<String>,
+
+        /// Show compact statistics (logforge style) instead of summary
+        #[arg(long)]
+        stats: bool,
     },
 
     /// Show error clusters (grouped similar error messages)
@@ -93,7 +111,7 @@ enum Commands {
         output: OutputFormat,
     },
 
-    /// Parse log entries and output as JSON/JSONL
+    /// Parse log entries and output as JSON/JSONL/CSV/TSV/Table
     Parse {
         /// Log file path (use - for stdin)
         #[arg(value_name = "FILE")]
@@ -103,13 +121,17 @@ enum Commands {
         #[arg(short, long)]
         format: Option<String>,
 
-        /// Output format (json, jsonl, yaml)
+        /// Output format (json, jsonl, yaml, csv, tsv, table)
         #[arg(short = 'o', long, default_value = "jsonl")]
         output: OutputFormat,
 
         /// Minimum log level
         #[arg(short, long)]
         level: Option<String>,
+
+        /// Advanced filter condition (e.g., "level=ERROR", "message contains 'timeout'")
+        #[arg(long)]
+        filter: Vec<String>,
     },
 
     /// Detect log format from a sample of the file
@@ -181,22 +203,6 @@ enum Commands {
     },
 }
 
-#[derive(Clone, ValueEnum)]
-enum OutputFormat {
-    Summary,
-    Text,
-    Json,
-    Yaml,
-    Jsonl,
-}
-
-#[derive(Clone, ValueEnum)]
-enum CompressFormat {
-    Text,
-    Json,
-    Csv,
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
@@ -208,6 +214,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             level,
             source,
             grep,
+            filter,
+            stats,
         } => cmd_analyze(
             &file,
             format.as_deref(),
@@ -215,6 +223,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             level.as_deref(),
             source.as_deref(),
             grep.as_deref(),
+            &filter,
+            stats,
         )?,
         Commands::Cluster {
             file,
@@ -232,7 +242,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format,
             output,
             level,
-        } => cmd_parse(&file, format.as_deref(), output, level.as_deref())?,
+            filter,
+        } => cmd_parse(&file, format.as_deref(), output, level.as_deref(), &filter)?,
         Commands::Detect { file } => cmd_detect(&file)?,
         Commands::Formats => cmd_formats(),
         Commands::Generate {
@@ -297,6 +308,8 @@ fn cmd_analyze(
     level: Option<&str>,
     source: Option<&str>,
     grep: Option<&str>,
+    filter_args: &[String],
+    compact_stats: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = read_file_content(file)?;
     let fmt = format
@@ -305,7 +318,7 @@ fn cmd_analyze(
 
     let (mut entries, parse_errors) = parser::parse_logs(&mut content.as_bytes(), fmt);
 
-    // Apply filters
+    // Apply simple filters (level, source, grep)
     if let Some(min_level) = level {
         let min = models::LogLevel::from_str(min_level);
         entries.retain(|e| e.level >= min);
@@ -318,9 +331,27 @@ fn cmd_analyze(
         entries.retain(|e| re.is_match(&e.message));
     }
 
+    // Apply advanced filters from logforge
+    for filter_str in filter_args {
+        let f = filter::parse_filter_string(filter_str)?;
+        entries.retain(|e| f.matches(e));
+    }
+
     let stats = analyzer::analyze(&entries, parse_errors);
     let clusters = analyzer::cluster_errors(&entries);
     let anomalies = analyzer::detect_anomalies(&entries, 5);
+
+    // Handle compact stats output (logforge style)
+    if compact_stats && !matches!(output, OutputFormat::Json | OutputFormat::Yaml) {
+        print_stats_compact(&stats);
+        if !clusters.is_empty() {
+            output::print_clusters(&clusters);
+        }
+        if !anomalies.is_empty() {
+            output::print_anomalies(&anomalies);
+        }
+        return Ok(());
+    }
 
     match output {
         OutputFormat::Json | OutputFormat::Jsonl => {
@@ -338,6 +369,16 @@ fn cmd_analyze(
         }
         OutputFormat::Text => {
             output::print_summary(&stats);
+        }
+        // For CSV/TSV/Table output with analyze, still show summary
+        _ => {
+            output::print_summary(&stats);
+            if !clusters.is_empty() {
+                output::print_clusters(&clusters);
+            }
+            if !anomalies.is_empty() {
+                output::print_anomalies(&anomalies);
+            }
         }
     }
 
@@ -398,6 +439,7 @@ fn cmd_parse(
     format: Option<&str>,
     output: OutputFormat,
     level: Option<&str>,
+    filter_args: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = read_file_content(file)?;
     let fmt = format
@@ -411,12 +453,21 @@ fn cmd_parse(
         entries.retain(|e| e.level >= min);
     }
 
+    // Apply advanced filters from logforge
+    for filter_str in filter_args {
+        let f = filter::parse_filter_string(filter_str)?;
+        entries.retain(|e| f.matches(e));
+    }
+
     match output {
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&entries)?);
         }
         OutputFormat::Yaml => {
             println!("{}", serde_yaml::to_string(&entries)?);
+        }
+        OutputFormat::Csv | OutputFormat::Tsv | OutputFormat::Table => {
+            print_entries(&entries, output);
         }
         _ => {
             // JSONL
@@ -459,28 +510,53 @@ fn cmd_detect(file: &str) -> Result<(), Box<dyn std::error::Error>> {
 fn cmd_formats() {
     println!("Supported Log Formats:");
     println!();
-    println!("  json     — JSON/JSONL log files (one JSON object per line)");
-    println!("             Fields: msg/message, level/severity, timestamp/time/ts, logger/source");
+    println!("  json       — JSON/JSONL log files (one JSON object per line)");
+    println!("               Fields: msg/message, level/severity, timestamp/time/ts, logger/source");
     println!();
-    println!("  logfmt   — logfmt format (key=value pairs)");
-    println!("             Fields: msg, level, logger, timestamp");
+    println!("  logfmt     — logfmt format (key=value pairs)");
+    println!("               Fields: msg, level, logger, timestamp");
     println!();
-    println!("  syslog   — Syslog (RFC 3164 and RFC 5424)");
-    println!("             Format: <priority>timestamp hostname app[pid]: message");
+    println!("  syslog     — Syslog (RFC 3164 and RFC 5424)");
+    println!("               Format: <priority>timestamp hostname app[pid]: message");
     println!();
-    println!("  plain    — Plain text with regex pattern detection");
-    println!("             Detects: ISO timestamps, log levels, module names");
+    println!("  plain      — Plain text with regex pattern detection");
+    println!("               Detects: ISO timestamps, log levels, module names");
     println!();
-    println!("  auto     — Auto-detect format from file content (default)");
+    println!("  rfc3339    — RFC3339 timestamp with level (2026-01-15T10:30:00Z [INFO] message)");
+    println!();
+    println!("  iso        — ISO timestamp with space-separated level (2026-01-15 10:30:00 INFO message)");
+    println!();
+    println!("  access     — Apache/Nginx access log format");
+    println!();
+    println!("  auto       — Auto-detect format from file content (default)");
+    println!();
+    println!("Output Formats:");
+    println!("  summary    — Formatted analysis with level distribution, clusters, anomalies (default)");
+    println!("  text       — Summary only");
+    println!("  json       — JSON analysis output");
+    println!("  yaml       — YAML analysis output");
+    println!("  jsonl      — JSON Lines (one object per line)");
+    println!("  csv        — CSV output (timestamp,level,source,message) with header");
+    println!("  tsv        — TSV output (timestamp\\tlevel\\tsource\\tmessage) with header");
+    println!("  table      — Tabular output with fixed-width columns");
+    println!();
+    println!("Advanced Filtering (--filter):");
+    println!("  Operators: =, neq, contains, not_contains, regex, gt, lt, gte, lte, startswith, endswith");
+    println!("  Fields: level, message, source, timestamp, or any custom field");
+    println!("  Examples:");
+    println!("    --filter 'level=ERROR'");
+    println!("    --filter 'message contains timeout'");
+    println!("    --filter 'status gt 100'");
+    println!("    --filter 'message regex db-\\d+'");
     println!();
     println!("Generation Formats:");
-    println!("  json     — JSON/JSONL output");
-    println!("  logfmt   — logfmt (key=value pairs)");
-    println!("  syslog   — Syslog format");
-    println!("  apache   — Apache Combined Log Format");
-    println!("  nginx    — Nginx access log format");
-    println!("  csv      — CSV (timestamp,level,source,message,correlation_id)");
-    println!("  plain    — Plain text");
+    println!("  json       — JSON/JSONL output");
+    println!("  logfmt     — logfmt (key=value pairs)");
+    println!("  syslog     — Syslog format");
+    println!("  apache     — Apache Combined Log Format");
+    println!("  nginx      — Nginx access log format");
+    println!("  csv        — CSV (timestamp,level,source,message,correlation_id)");
+    println!("  plain      — Plain text");
     println!();
     println!("Compression (Drain Algorithm):");
     println!("  Templates extracted via fixed-depth parse tree");

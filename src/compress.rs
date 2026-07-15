@@ -8,8 +8,17 @@
 //! "Drain: An Online Log Parsing Approach with Fixed Depth Tree."
 //! IEEE International Conference on Web Services (ICWS).
 
+use clap::ValueEnum;
 use std::collections::HashMap;
 use std::io::BufRead;
+
+/// Output format for compression results.
+#[derive(Clone, ValueEnum, Debug)]
+pub enum CompressFormat {
+    Text,
+    Json,
+    Csv,
+}
 
 /// Configuration for the Drain algorithm.
 #[derive(Debug, Clone)]
