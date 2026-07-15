@@ -6,8 +6,10 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 static ACCESS_LOG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r##"^(\\S+) - (\\S+) \\[([^\\]]+)\\] "(\\S+) (\\S+) (\\S+)" (\\d{3}) (\\d+|-) "([^"]*)" "([^"]*)""##)
-        .unwrap()
+    Regex::new(
+        r#"^(\S+) - (\S+) \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)""#,
+    )
+    .unwrap()
 });
 
 pub fn parse_line(line: &str) -> Option<LogEntry> {

@@ -2,14 +2,17 @@
 //! Format: 2026-01-15T10:30:00Z [INFO] message
 
 use crate::models::{LogEntry, LogLevel};
-use chrono::{DateTime, FixedOffset};
+use chrono::DateTime;
 use regex::Regex;
 use std::sync::LazyLock;
 
+#[allow(clippy::invalid_regex)]
 static RFC3339_LEVEL: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::invalid_regex)]
     Regex::new(
-        r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}?)\s+\[?(DEBUG|INFO|WARN(?:ING)?|ERROR|CRIT(?:ICAL)?|FATAL|NOTICE|TRACE)\]?\s+(.*)$"
-    ).unwrap()
+        r#"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}?)\s+\[?(DEBUG|INFO|WARN(?:ING)?|ERROR|CRIT(?:ICAL)?|FATAL|NOTICE|TRACE)\]?\s+(.*)$"#,
+    )
+    .unwrap()
 });
 
 pub fn parse_line(line: &str) -> Option<LogEntry> {
@@ -21,7 +24,6 @@ pub fn parse_line(line: &str) -> Option<LogEntry> {
     let caps = RFC3339_LEVEL.captures(line)?;
     let ts_str = &caps[1];
 
-    // Try parsing as RFC3339 first, then fallback to naive formats
     let timestamp = DateTime::parse_from_rfc3339(ts_str)
         .ok()
         .map(|dt| dt.with_timezone(&chrono::Utc))
