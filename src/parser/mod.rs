@@ -34,10 +34,10 @@ impl LogFormat {
     }
 
     /// List all supported format names.
+    #[allow(dead_code)]
     pub fn all_names() -> &'static [&'static str] {
         &[
-            "json", "jsonl", "logfmt", "syslog", "rfc5424",
-            "plain", "text", "log", "auto",
+            "json", "jsonl", "logfmt", "syslog", "rfc5424", "plain", "text", "log", "auto",
             // Additional formats from logforge
             "rfc3339", "iso", "access", "simple", "level", "ts",
         ]

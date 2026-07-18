@@ -16,13 +16,24 @@ mod models;
 mod output;
 mod parser;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use compress::{CompressFormat, DrainConfig};
-use filter::Filter;
 use generate::GenerateConfig;
-use output::{OutputFormat, print_entries, print_entry, print_stats_compact};
+use output::{print_entries, print_stats_compact, OutputFormat};
 use std::io::{self, BufReader, Read};
 use std::path::Path;
+
+/// Configuration for the analyze command.
+struct AnalyzeConfig<'a> {
+    file: &'a str,
+    format: Option<&'a str>,
+    output: OutputFormat,
+    level: Option<&'a str>,
+    source: Option<&'a str>,
+    grep: Option<&'a str>,
+    filters: &'a [String],
+    compact_stats: bool,
+}
 
 #[derive(Parser)]
 #[command(
@@ -216,16 +227,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             grep,
             filter,
             stats,
-        } => cmd_analyze(
-            &file,
-            format.as_deref(),
-            output,
-            level.as_deref(),
-            source.as_deref(),
-            grep.as_deref(),
-            &filter,
-            stats,
-        )?,
+        } => {
+            let config = AnalyzeConfig {
+                file: &file,
+                format: format.as_deref(),
+                output,
+                level: level.as_deref(),
+                source: source.as_deref(),
+                grep: grep.as_deref(),
+                filters: &filter,
+                compact_stats: stats,
+            };
+            cmd_analyze(&config)?;
+        }
         Commands::Cluster {
             file,
             format,
@@ -301,38 +315,30 @@ fn detect_format_from_str(sample: &str) -> parser::LogFormat {
     }
 }
 
-fn cmd_analyze(
-    file: &str,
-    format: Option<&str>,
-    output: OutputFormat,
-    level: Option<&str>,
-    source: Option<&str>,
-    grep: Option<&str>,
-    filter_args: &[String],
-    compact_stats: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let content = read_file_content(file)?;
-    let fmt = format
+fn cmd_analyze(config: &AnalyzeConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let content = read_file_content(config.file)?;
+    let fmt = config
+        .format
         .map(parser::LogFormat::from_str)
         .unwrap_or_else(|| detect_format_from_str(&content));
 
     let (mut entries, parse_errors) = parser::parse_logs(&mut content.as_bytes(), fmt);
 
     // Apply simple filters (level, source, grep)
-    if let Some(min_level) = level {
+    if let Some(min_level) = config.level {
         let min = models::LogLevel::from_str(min_level);
         entries.retain(|e| e.level >= min);
     }
-    if let Some(src) = source {
+    if let Some(src) = config.source {
         entries.retain(|e| e.source.as_ref().map(|s| s.contains(src)).unwrap_or(false));
     }
-    if let Some(pattern) = grep {
+    if let Some(pattern) = config.grep {
         let re = regex::Regex::new(pattern)?;
         entries.retain(|e| re.is_match(&e.message));
     }
 
     // Apply advanced filters from logforge
-    for filter_str in filter_args {
+    for filter_str in config.filters {
         let f = filter::parse_filter_string(filter_str)?;
         entries.retain(|e| f.matches(e));
     }
@@ -342,7 +348,7 @@ fn cmd_analyze(
     let anomalies = analyzer::detect_anomalies(&entries, 5);
 
     // Handle compact stats output (logforge style)
-    if compact_stats && !matches!(output, OutputFormat::Json | OutputFormat::Yaml) {
+    if config.compact_stats && !matches!(config.output, OutputFormat::Json | OutputFormat::Yaml) {
         print_stats_compact(&stats);
         if !clusters.is_empty() {
             output::print_clusters(&clusters);
@@ -353,7 +359,7 @@ fn cmd_analyze(
         return Ok(());
     }
 
-    match output {
+    match config.output {
         OutputFormat::Json | OutputFormat::Jsonl => {
             output::print_json(&stats, &clusters, &anomalies)
         }
@@ -511,7 +517,9 @@ fn cmd_formats() {
     println!("Supported Log Formats:");
     println!();
     println!("  json       — JSON/JSONL log files (one JSON object per line)");
-    println!("               Fields: msg/message, level/severity, timestamp/time/ts, logger/source");
+    println!(
+        "               Fields: msg/message, level/severity, timestamp/time/ts, logger/source"
+    );
     println!();
     println!("  logfmt     — logfmt format (key=value pairs)");
     println!("               Fields: msg, level, logger, timestamp");
@@ -531,7 +539,9 @@ fn cmd_formats() {
     println!("  auto       — Auto-detect format from file content (default)");
     println!();
     println!("Output Formats:");
-    println!("  summary    — Formatted analysis with level distribution, clusters, anomalies (default)");
+    println!(
+        "  summary    — Formatted analysis with level distribution, clusters, anomalies (default)"
+    );
     println!("  text       — Summary only");
     println!("  json       — JSON analysis output");
     println!("  yaml       — YAML analysis output");

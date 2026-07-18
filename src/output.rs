@@ -22,6 +22,7 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "summary" => OutputFormat::Summary,
@@ -91,14 +92,29 @@ fn print_top_messages(template_counts: &HashMap<String, usize>, top_n: usize) {
 /// Print statistics as a formatted summary.
 pub fn print_summary(stats: &LogStats) {
     println!();
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
     println!("  📊 Log Analysis Summary");
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
     println!();
-    println!("  Total lines:      {}", stats.total_lines.to_string().bold());
-    println!("  Parsed:           {}", stats.parsed_lines.to_string().green());
+    println!(
+        "  Total lines:      {}",
+        stats.total_lines.to_string().bold()
+    );
+    println!(
+        "  Parsed:           {}",
+        stats.parsed_lines.to_string().green()
+    );
     if stats.parse_errors > 0 {
-        println!("  Parse errors:     {}", stats.parse_errors.to_string().red());
+        println!(
+            "  Parse errors:     {}",
+            stats.parse_errors.to_string().red()
+        );
     }
     println!();
 
@@ -136,7 +152,10 @@ pub fn print_summary(stats: &LogStats) {
     }
 
     println!();
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
 }
 
 // =========================================================================
@@ -216,11 +235,23 @@ fn print_entry_yaml(entry: &LogEntry) {
 }
 
 fn print_entry_csv(entry: &LogEntry) {
-    println!("{},{},{},{}", csv_escape(&entry.timestamp.map(|t| t.to_rfc3339()).unwrap_or_default()), csv_escape(entry.level.as_str()), csv_escape(entry.source.as_deref().unwrap_or("")), csv_escape(&entry.message));
+    println!(
+        "{},{},{},{}",
+        csv_escape(&entry.timestamp.map(|t| t.to_rfc3339()).unwrap_or_default()),
+        csv_escape(entry.level.as_str()),
+        csv_escape(entry.source.as_deref().unwrap_or("")),
+        csv_escape(&entry.message)
+    );
 }
 
 fn print_entry_tsv(entry: &LogEntry) {
-    println!("{}\t{}\t{}\t{}", tsv_escape(&entry.timestamp.map(|t| t.to_rfc3339()).unwrap_or_default()), tsv_escape(entry.level.as_str()), tsv_escape(entry.source.as_deref().unwrap_or("")), tsv_escape(&entry.message));
+    println!(
+        "{}\t{}\t{}\t{}",
+        tsv_escape(&entry.timestamp.map(|t| t.to_rfc3339()).unwrap_or_default()),
+        tsv_escape(entry.level.as_str()),
+        tsv_escape(entry.source.as_deref().unwrap_or("")),
+        tsv_escape(&entry.message)
+    );
 }
 
 fn print_entry_table(entry: &LogEntry) {
@@ -307,9 +338,15 @@ pub fn print_clusters(clusters: &[ErrorCluster]) {
     }
 
     println!();
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
     println!("  🔍 Error Clusters");
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
     println!();
 
     for (i, cluster) in clusters.iter().enumerate() {
@@ -347,9 +384,15 @@ pub fn print_anomalies(anomalies: &[AnomalyReport]) {
     }
 
     println!();
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
     println!("  ⚠️ Rate Anomalies");
-    println!("{}", "═══════════════════════════════════════════════════".dimmed());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════".dimmed()
+    );
     println!();
 
     for anomaly in anomalies {
@@ -378,7 +421,10 @@ pub fn print_json(stats: &LogStats, clusters: &[ErrorCluster], anomalies: &[Anom
         "clusters": clusters,
         "anomalies": anomalies,
     });
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 /// Print stats as YAML.

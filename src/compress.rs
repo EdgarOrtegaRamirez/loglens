@@ -9,7 +9,6 @@
 //! IEEE International Conference on Web Services (ICWS).
 
 use clap::ValueEnum;
-use std::collections::HashMap;
 use std::io::BufRead;
 
 /// Output format for compression results.
@@ -88,8 +87,8 @@ pub struct DrainParser {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Cluster {
-    id: usize,
     template_tokens: Vec<String>,
     count: usize,
     samples: Vec<String>,
@@ -151,7 +150,7 @@ impl DrainParser {
             })
             .collect();
 
-        templates.sort_by(|a, b| b.count.cmp(&a.count));
+        templates.sort_by_key(|t| std::cmp::Reverse(t.count));
 
         DrainResult {
             total_lines,
@@ -169,15 +168,12 @@ impl DrainParser {
         let processed_tokens: Vec<String> = tokens
             .iter()
             .map(|t| {
-                if looks_like_number(t) {
-                    "*".to_string()
-                } else if looks_like_ip(t) {
-                    "*".to_string()
-                } else if looks_like_uuid(t) {
-                    "*".to_string()
-                } else if looks_like_hex(t) {
-                    "*".to_string()
-                } else if looks_like_path(t) {
+                if looks_like_number(t)
+                    || looks_like_ip(t)
+                    || looks_like_uuid(t)
+                    || looks_like_hex(t)
+                    || looks_like_path(t)
+                {
                     "*".to_string()
                 } else {
                     t.clone()
@@ -219,7 +215,6 @@ impl DrainParser {
                 .collect();
 
             self.clusters.push(Cluster {
-                id: cluster_id,
                 template_tokens: template_tokens.clone(),
                 count: 1,
                 samples: vec![line.to_string()],
@@ -237,8 +232,7 @@ impl DrainParser {
         let mut best_match: Option<usize> = None;
         let mut best_similarity = self.similarity;
 
-        for d in 0..depth {
-            let token = &tokens[d];
+        for (d, token) in tokens.iter().enumerate().take(depth) {
             let mut found = false;
 
             for child in &current.children {
@@ -299,16 +293,12 @@ impl DrainParser {
         let depth = std::cmp::min(self.depth, tokens.len());
         let mut current = &mut self.root;
 
-        for d in 0..depth {
-            let token = &tokens[d];
-            let mut found = false;
-
+        for (d, token) in tokens.iter().enumerate().take(depth) {
             // Check if we need to find or create a child
             let child_idx = current.children.iter().position(|c| c.key == *token);
 
             if let Some(idx) = child_idx {
                 current = &mut current.children[idx];
-                found = true;
             } else {
                 // Create new node
                 if current.children.len() < self.max_children {
@@ -318,7 +308,6 @@ impl DrainParser {
                         cluster_id: None,
                     });
                     current = current.children.last_mut().unwrap();
-                    found = true;
                 } else {
                     // Too many children — add under wildcard
                     let wc_idx = current.children.iter().position(|c| c.key == "*");
@@ -337,12 +326,7 @@ impl DrainParser {
                             return; // Too many children even with wildcard
                         }
                     }
-                    found = true;
                 }
-            }
-
-            if !found {
-                return;
             }
 
             // If this is the last depth level, set the cluster ID
@@ -536,6 +520,7 @@ fn looks_like_path(s: &str) -> bool {
 /// Template a log message by replacing variable parts with placeholders.
 /// This does NOT use the Drain algorithm — it's a simpler regex-based approach
 /// similar to what loglens already has in models.rs.
+#[allow(dead_code)]
 pub fn template_message(msg: &str) -> String {
     let mut result = String::with_capacity(msg.len());
     let chars: Vec<char> = msg.chars().collect();
@@ -594,7 +579,6 @@ pub fn template_message(msg: &str) -> String {
         if chars[i].is_ascii_digit()
             || (chars[i] == '-' && i + 1 < len && chars[i + 1].is_ascii_digit())
         {
-            let start = i;
             if chars[i] == '-' {
                 i += 1;
             }

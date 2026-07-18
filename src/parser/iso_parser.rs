@@ -44,7 +44,11 @@ fn parse_ts(s: &str) -> Option<chrono::DateTime<Utc>> {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
         return Some(dt.with_timezone(&Utc));
     }
-    for fmt in &["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S%.f"] {
+    for fmt in &[
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ] {
         if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
             return Some(naive.and_utc());
         }

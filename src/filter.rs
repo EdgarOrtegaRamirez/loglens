@@ -5,7 +5,6 @@
 //! Supports AND/OR logic with multiple conditions.
 
 use crate::models::LogEntry;
-use std::collections::HashMap;
 
 /// Filter condition.
 #[derive(Debug, Clone)]
@@ -50,6 +49,7 @@ impl Filter {
     }
 
     /// Get the field value from a log entry.
+    #[allow(dead_code)]
     fn get_field_value(&self, field: &str, entry: &LogEntry) -> String {
         match field.to_lowercase().as_str() {
             "level" => entry.level.as_str().to_string(),
@@ -86,7 +86,9 @@ impl Condition {
             "eq" | "equals" => field_value.eq_ignore_ascii_case(value),
             "neq" | "ne" | "not_equals" => !field_value.eq_ignore_ascii_case(value),
             "contains" => field_value.to_lowercase().contains(&value.to_lowercase()),
-            "not_contains" | "notcontains" => !field_value.to_lowercase().contains(&value.to_lowercase()),
+            "not_contains" | "notcontains" => {
+                !field_value.to_lowercase().contains(&value.to_lowercase())
+            }
             "regex" => {
                 if let Ok(re) = regex::Regex::new(value) {
                     re.is_match(field_value)
@@ -98,7 +100,9 @@ impl Condition {
             "lt" | "less_than" => compare_numeric(field_value, value, "<"),
             "gte" | "ge" | "greater_or_equal" => compare_numeric(field_value, value, ">="),
             "lte" | "le" | "less_or_equal" => compare_numeric(field_value, value, "<="),
-            "startswith" => field_value.to_lowercase().starts_with(&value.to_lowercase()),
+            "startswith" => field_value
+                .to_lowercase()
+                .starts_with(&value.to_lowercase()),
             "endswith" => field_value.to_lowercase().ends_with(&value.to_lowercase()),
             _ => false,
         }
@@ -186,7 +190,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     // Try regex: field regex pattern
     if let Some(idx) = s.rfind(" regex ") {
         let field = s[..idx].trim().to_string();
-        let pattern = strip_quotes(&s[idx + 6..].trim().to_string());
+        let pattern = strip_quotes(s[idx + 6..].trim());
         return Ok(Condition {
             field,
             operator: "regex".to_string(),
@@ -197,7 +201,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     // Try contains: field contains value
     if let Some(idx) = s.rfind(" contains ") {
         let field = s[..idx].trim().to_string();
-        let value = strip_quotes(&s[idx + 10..].trim().to_string());
+        let value = strip_quotes(s[idx + 10..].trim());
         return Ok(Condition {
             field,
             operator: "contains".to_string(),
@@ -208,7 +212,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     // Try not_contains: field not_contains value
     if let Some(idx) = s.rfind(" not_contains ") {
         let field = s[..idx].trim().to_string();
-        let value = strip_quotes(&s[idx + 14..].trim().to_string());
+        let value = strip_quotes(s[idx + 14..].trim());
         return Ok(Condition {
             field,
             operator: "not_contains".to_string(),
@@ -219,7 +223,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     // Try starts_with
     if let Some(idx) = s.rfind(" starts_with ") {
         let field = s[..idx].trim().to_string();
-        let value = strip_quotes(&s[idx + 13..].trim().to_string());
+        let value = strip_quotes(s[idx + 13..].trim());
         return Ok(Condition {
             field,
             operator: "startswith".to_string(),
@@ -230,7 +234,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     // Try ends_with
     if let Some(idx) = s.rfind(" ends_with ") {
         let field = s[..idx].trim().to_string();
-        let value = strip_quotes(&s[idx + 11..].trim().to_string());
+        let value = strip_quotes(s[idx + 11..].trim());
         return Ok(Condition {
             field,
             operator: "endswith".to_string(),
@@ -242,7 +246,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     for op in &[" neq ", " eq ", " gt ", " lt ", " gte ", " lte "] {
         if let Some(idx) = s.rfind(op) {
             let field = s[..idx].trim().to_string();
-            let value = strip_quotes(&s[idx + op.len()..].trim().to_string());
+            let value = strip_quotes(s[idx + op.len()..].trim());
             return Ok(Condition {
                 field,
                 operator: op.trim().to_string(),
@@ -254,7 +258,7 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
     // Try simple: field=value (equals)
     if let Some(idx) = s.find('=') {
         let field = s[..idx].trim().to_string();
-        let value = strip_quotes(&s[idx + 1..].trim().to_string());
+        let value = strip_quotes(s[idx + 1..].trim());
         return Ok(Condition {
             field,
             operator: "eq".to_string(),
@@ -267,12 +271,10 @@ fn parse_condition(s: &str) -> Result<Condition, String> {
 
 /// Strip surrounding quotes from a string.
 fn strip_quotes(s: &str) -> String {
-    if s.len() >= 2 {
-        if (s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\''))
-        {
-            return s[1..s.len() - 1].to_string();
-        }
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+    {
+        return s[1..s.len() - 1].to_string();
     }
     s.to_string()
 }
